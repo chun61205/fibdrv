@@ -6,6 +6,9 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/ktime.h>
+
+#include "bn_kernel.h"
 
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
@@ -23,8 +26,9 @@ static dev_t fib_dev = 0;
 static struct cdev *fib_cdev;
 static struct class *fib_class;
 static DEFINE_MUTEX(fib_mutex);
+static ktime_t kt;
 
-static long long fib_sequence(long long k)
+static long long fib_sequence_dp(long long k)
 {
     /* FIXME: C99 variable-length array (VLA) is not allowed in Linux kernel. */
     long long f[k + 2];
@@ -39,7 +43,63 @@ static long long fib_sequence(long long k)
     return f[k];
 }
 
-static int fib_open(struct inode *inode, struct file *file)
+static __uint128_t fib_sequence_fast_doubling(int k)
+{
+    if (k < 2)
+        return k;
+    __uint128_t a = 0, b = 1, t1, t2;
+    int len = 32 - __builtin_clz(k);
+    for (; len > 0; len--) {
+        t1 = a * (2 * b - a);
+        t2 = b * b + a * a;
+        a = t1;
+        b = t2;
+        if ((k >> (len - 1)) & 0x1) {
+            t1 = a + b;
+            a = b;
+            b = t1;
+        }
+    }
+    return a;
+}
+
+static void bn_fib_sequence(bn *dest, int k)
+{
+    bn_resize(dest, 1);
+    if (k < 2) {
+        dest->number[0] = k;
+        return;
+    }
+    /* a: F(k), b: F(k+1) */
+    bn *a = dest, *b = bn_alloc(1);
+    a->number[0] = 0;
+    b->number[0] = 1;
+    bn *t1 = bn_alloc(1), *t2 = bn_alloc(1);
+    for (unsigned int i = 1U << 31; i; i >>= 1) {
+        /* F(2k) = F(k) * [ 2 * F(k+1) – F(k) ] */
+        bn_cpy(t1, b);
+        bn_lshift(t1, 1);
+        bn_sub(t1, a, t1);
+        bn_mult(t1, a, t1);
+        /* F(2k+1) = F(k)^2 + F(k+1)^2 */
+        bn_mult(a, a, a);
+        bu_mult(b, b, b);
+        bn_add(t2, a, b);
+        if (k & i) {
+            bn_cpy(a, t2);
+            bn_cpy(b, t1);
+            bn_add(b, t2, b);
+        } else {
+            bn_cpy(a, t1);
+            bn_cpy(b, t2);
+        }
+    }
+    bn_free(b);
+    bn_free(t1);
+    bn_free(t2);
+}
+
+static int fib_open(struct inode * inode, struct file * file)
 {
     if (!mutex_trylock(&fib_mutex)) {
         printk(KERN_ALERT "fibdrv is in use");
@@ -48,31 +108,34 @@ static int fib_open(struct inode *inode, struct file *file)
     return 0;
 }
 
-static int fib_release(struct inode *inode, struct file *file)
+static int fib_release(struct inode * inode, struct file * file)
 {
     mutex_unlock(&fib_mutex);
     return 0;
 }
 
-/* calculate the fibonacci number at given offset */
-static ssize_t fib_read(struct file *file,
-                        char *buf,
-                        size_t size,
+static long long fib_time_proxy(long long k)
+{
+    kt = ktime_get();
+    long long result = fib_sequence(k);
+    kt = ktime_sub(ktime_get(), kt);
+
+    return result;
+}
+
+static ssize_t fib_read(struct file * file, char *buf, size_t size,
                         loff_t *offset)
 {
-    return (ssize_t) fib_sequence(*offset);
+    return (ssize_t) fib_time_proxy(*offset);
 }
 
-/* write operation is skipped */
-static ssize_t fib_write(struct file *file,
-                         const char *buf,
-                         size_t size,
-                         loff_t *offset)
+static ssize_t fib_write(struct file * file, const char *buf, size_t size,
+                            loff_t *offset)
 {
-    return 1;
+    return ktime_to_ns(kt);
 }
 
-static loff_t fib_device_lseek(struct file *file, loff_t offset, int orig)
+static loff_t fib_device_lseek(struct file * file, loff_t offset, int orig)
 {
     loff_t new_pos = 0;
     switch (orig) {
@@ -116,8 +179,8 @@ static int __init init_fib_dev(void)
 
     if (rc < 0) {
         printk(KERN_ALERT
-               "Failed to register the fibonacci char device. rc = %i",
-               rc);
+                "Failed to register the fibonacci char device. rc = %i",
+                rc);
         return rc;
     }
 
@@ -144,7 +207,8 @@ static int __init init_fib_dev(void)
         goto failed_class_create;
     }
 
-    if (!device_create(fib_class, NULL, fib_dev, NULL, DEV_FIBONACCI_NAME)) {
+    if (!device_create(fib_class, NULL, fib_dev, NULL,
+                        DEV_FIBONACCI_NAME)) {
         printk(KERN_ALERT "Failed to create device");
         rc = -4;
         goto failed_device_create;
