@@ -167,6 +167,23 @@ void bn_lshift(bn *src, size_t shift)
     src->number[0] <<= shift;
 }
 
+/* right bit shift on bn (maximun shift 31) */
+// void bn_rshift(bn *src, size_t shift)
+// {
+//     size_t z = 32 - bn_clz(src);
+//     shift %= 32;  // only handle shift within 32 bits atm
+//     if (!shift)
+//         return;
+//
+//
+//     for (int i = 0; i < (src->size - 1); i++)
+//         src->number[i] = src->number[i] >> shift | src->number[i + 1] << (32
+//         - shift);
+//     src->number[src->size - 1] >>= shift;
+//
+//     if (shift >= z && src->size > 1)
+//         bn_resize(src, src->size - 1);
+// }
 
 /*
  * compare length
