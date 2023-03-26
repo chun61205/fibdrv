@@ -1,0 +1,27 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/usr/include",
+                "/usr/local/include",
+                "/usr/src/linux-headers-5.19.0-35-generic/include",
+                "/usr/src/linux-headers-5.19.0-35-generic/arch/x86/include",
+                "/usr/src/linux-headers-5.19.0-35-generic/arch/x86/include/generated",
+                "/usr/lib/gcc/x86_64-linux-gnu/11/include"
+            ],
+            "compilerPath": "/usr/bin/gcc",
+            "defines": [
+                "KBUILD_MODNAME=\"dummyname\"",
+                "__GNUC__",
+                "__KERNEL__",
+                "MODULE"
+            ],
+            "cStandard": "c17",
+            "cppStandard": "gnu++17",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}

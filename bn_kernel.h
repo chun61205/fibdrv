@@ -29,6 +29,13 @@ bn *bn_alloc(size_t size);
 int bn_free(bn *src);
 
 /*
+ * resize bn
+ * return 0 on success, -1 on error
+ * data lose IS neglected when shinking the size
+ */
+int bn_resize(bn *src, size_t size);
+
+/*
  * copy the value from src to dest
  * return 0 on success, -1 on error
  */
@@ -59,7 +66,3 @@ void bn_sub(const bn *a, const bn *b, bn *c);
 
 /* c = a x b */
 void bn_mult(const bn *a, const bn *b, bn *c);
-
-/* calc n-th Fibonacci number and save into dest */
-void bn_fib_fdoubling(bn *dest, unsigned int n);
-void bn_fib(bn *dest, unsigned int n);

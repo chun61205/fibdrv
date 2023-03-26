@@ -110,7 +110,7 @@ int bn_free(bn *src)
  * return 0 on success, -1 on error
  * data lose IS neglected when shinking the size
  */
-static int bn_resize(bn *src, size_t size)
+int bn_resize(bn *src, size_t size)
 {
     if (!src)
         return -1;
@@ -142,13 +142,14 @@ int bn_cpy(bn *dest, bn *src)
 }
 
 /* swap bn ptr */
+/*
 void bn_swap(bn *a, bn *b)
 {
     bn tmp = *a;
     *a = *b;
     *b = tmp;
 }
-
+*/
 /* left bit shift on bn (maximun shift 31) */
 void bn_lshift(bn *src, size_t shift)
 {
@@ -166,23 +167,6 @@ void bn_lshift(bn *src, size_t shift)
     src->number[0] <<= shift;
 }
 
-/* right bit shift on bn (maximun shift 31) */
-void bn_rshift(bn *src, size_t shift)
-{
-    size_t z = 32 - bn_clz(src);
-    shift %= 32;  // only handle shift within 32 bits atm
-    if (!shift)
-        return;
-
-    /* bit shift */
-    for (int i = 0; i < (src->size - 1); i++)
-        src->number[i] = src->number[i] >> shift | src->number[i + 1]
-                                                       << (32 - shift);
-    src->number[src->size - 1] >>= shift;
-
-    if (shift >= z && src->size > 1)
-        bn_resize(src, src->size - 1);
-}
 
 /*
  * compare length
@@ -348,72 +332,4 @@ void bn_mult(const bn *a, const bn *b, bn *c)
         bn_cpy(tmp, c);  // restore c
         bn_free(c);
     }
-}
-
-/* calc n-th Fibonacci number and save into dest */
-void bn_fib(bn *dest, unsigned int n)
-{
-    bn_resize(dest, 1);
-    if (n < 2) {  // Fib(0) = 0, Fib(1) = 1
-        dest->number[0] = n;
-        return;
-    }
-
-    bn *a = bn_alloc(1);
-    bn *b = bn_alloc(1);
-    dest->number[0] = 1;
-
-    for (unsigned int i = 1; i < n; i++) {
-        bn_cpy(b, dest);
-        bn_add(dest, a, dest);
-        bn_swap(a, b);
-    }
-    bn_free(a);
-    bn_free(b);
-}
-
-/*
- * calc n-th Fibonacci number and save into dest
- * using fast doubling algorithm
- */
-void bn_fib_fdoubling(bn *dest, unsigned int n)
-{
-    bn_resize(dest, 1);
-    if (n < 2) {  // Fib(0) = 0, Fib(1) = 1
-        dest->number[0] = n;
-        return;
-    }
-
-    bn *f1 = dest;        /* F(k) */
-    bn *f2 = bn_alloc(1); /* F(k+1) */
-    f1->number[0] = 0;
-    f2->number[0] = 1;
-    bn *k1 = bn_alloc(1);
-    bn *k2 = bn_alloc(1);
-
-    /* walk through the digit of n */
-    for (unsigned int i = 1U << 31; i; i >>= 1) {
-        /* F(2k) = F(k) * [ 2 * F(k+1) – F(k) ] */
-        bn_cpy(k1, f2);
-        bn_lshift(k1, 1);
-        bn_sub(k1, f1, k1);
-        bn_mult(k1, f1, k1);
-        /* F(2k+1) = F(k)^2 + F(k+1)^2 */
-        bn_mult(f1, f1, f1);
-        bn_mult(f2, f2, f2);
-        bn_cpy(k2, f1);
-        bn_add(k2, f2, k2);
-        if (n & i) {
-            bn_cpy(f1, k2);
-            bn_cpy(f2, k1);
-            bn_add(f2, k2, f2);
-        } else {
-            bn_cpy(f1, k1);
-            bn_cpy(f2, k2);
-        }
-    }
-    // return f[0]
-    bn_free(f2);
-    bn_free(k1);
-    bn_free(k2);
 }

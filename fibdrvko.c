@@ -4,9 +4,9 @@
 #include <linux/init.h>
 #include <linux/kdev_t.h>
 #include <linux/kernel.h>
+#include <linux/ktime.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
-#include <linux/ktime.h>
 
 #include "bn_kernel.h"
 
@@ -20,7 +20,7 @@ MODULE_VERSION("0.1");
 /* MAX_LENGTH is set to 92 because
  * ssize_t can't fit the number > 92
  */
-#define MAX_LENGTH 92
+#define MAX_LENGTH 100
 
 static dev_t fib_dev = 0;
 static struct cdev *fib_cdev;
@@ -28,9 +28,9 @@ static struct class *fib_class;
 static DEFINE_MUTEX(fib_mutex);
 static ktime_t kt;
 
+/*
 static long long fib_sequence_dp(long long k)
 {
-    /* FIXME: C99 variable-length array (VLA) is not allowed in Linux kernel. */
     long long f[k + 2];
 
     f[0] = 0;
@@ -42,7 +42,6 @@ static long long fib_sequence_dp(long long k)
 
     return f[k];
 }
-
 static __uint128_t fib_sequence_fast_doubling(int k)
 {
     if (k < 2)
@@ -62,44 +61,50 @@ static __uint128_t fib_sequence_fast_doubling(int k)
     }
     return a;
 }
-
-static void bn_fib_sequence(bn *dest, int k)
+*/
+void fib_fdoubling_bn(bn *dest, unsigned int n)
 {
     bn_resize(dest, 1);
-    if (k < 2) {
-        dest->number[0] = k;
+    if (n < 2) {  // Fib(0) = 0, Fib(1) = 1
+        dest->number[0] = n;
         return;
     }
-    /* a: F(k), b: F(k+1) */
-    bn *a = dest, *b = bn_alloc(1);
-    a->number[0] = 0;
-    b->number[0] = 1;
-    bn *t1 = bn_alloc(1), *t2 = bn_alloc(1);
+
+    bn *f1 = dest;        /* F(k) */
+    bn *f2 = bn_alloc(1); /* F(k+1) */
+    f1->number[0] = 0;
+    f2->number[0] = 1;
+    bn *k1 = bn_alloc(1);
+    bn *k2 = bn_alloc(1);
+
+    /* walk through the digit of n */
     for (unsigned int i = 1U << 31; i; i >>= 1) {
         /* F(2k) = F(k) * [ 2 * F(k+1) – F(k) ] */
-        bn_cpy(t1, b);
-        bn_lshift(t1, 1);
-        bn_sub(t1, a, t1);
-        bn_mult(t1, a, t1);
+        bn_cpy(k1, f2);
+        bn_lshift(k1, 1);
+        bn_sub(k1, f1, k1);
+        bn_mult(k1, f1, k1);
         /* F(2k+1) = F(k)^2 + F(k+1)^2 */
-        bn_mult(a, a, a);
-        bu_mult(b, b, b);
-        bn_add(t2, a, b);
-        if (k & i) {
-            bn_cpy(a, t2);
-            bn_cpy(b, t1);
-            bn_add(b, t2, b);
+        bn_mult(f1, f1, f1);
+        bn_mult(f2, f2, f2);
+        bn_cpy(k2, f1);
+        bn_add(k2, f2, k2);
+        if (n & i) {
+            bn_cpy(f1, k2);
+            bn_cpy(f2, k1);
+            bn_add(f2, k2, f2);
         } else {
-            bn_cpy(a, t1);
-            bn_cpy(b, t2);
+            bn_cpy(f1, k1);
+            bn_cpy(f2, k2);
         }
     }
-    bn_free(b);
-    bn_free(t1);
-    bn_free(t2);
+    // return f[0]
+    bn_free(f2);
+    bn_free(k1);
+    bn_free(k2);
 }
 
-static int fib_open(struct inode * inode, struct file * file)
+static int fib_open(struct inode *inode, struct file *file)
 {
     if (!mutex_trylock(&fib_mutex)) {
         printk(KERN_ALERT "fibdrv is in use");
@@ -108,34 +113,42 @@ static int fib_open(struct inode * inode, struct file * file)
     return 0;
 }
 
-static int fib_release(struct inode * inode, struct file * file)
+static int fib_release(struct inode *inode, struct file *file)
 {
     mutex_unlock(&fib_mutex);
     return 0;
 }
 
-static long long fib_time_proxy(long long k)
+bn *fib_time_proxy(long long k)
 {
     kt = ktime_get();
-    long long result = fib_sequence(k);
+    bn *dest = bn_alloc(1);
+    fib_fdoubling_bn(dest, k);
     kt = ktime_sub(ktime_get(), kt);
-
-    return result;
+    return dest;
 }
 
-static ssize_t fib_read(struct file * file, char *buf, size_t size,
+static ssize_t fib_read(struct file *file,
+                        char *buf,
+                        size_t size,
                         loff_t *offset)
 {
-    return (ssize_t) fib_time_proxy(*offset);
+    bn *dest = fib_time_proxy(*offset);
+    char *result = bn_to_string(dest);
+    int len = strlen(result);
+    copy_to_user(buf, result, len);
+    return (ssize_t) len;
 }
 
-static ssize_t fib_write(struct file * file, const char *buf, size_t size,
-                            loff_t *offset)
+static ssize_t fib_write(struct file *file,
+                         const char *buf,
+                         size_t size,
+                         loff_t *offset)
 {
     return ktime_to_ns(kt);
 }
 
-static loff_t fib_device_lseek(struct file * file, loff_t offset, int orig)
+static loff_t fib_device_lseek(struct file *file, loff_t offset, int orig)
 {
     loff_t new_pos = 0;
     switch (orig) {
@@ -179,8 +192,8 @@ static int __init init_fib_dev(void)
 
     if (rc < 0) {
         printk(KERN_ALERT
-                "Failed to register the fibonacci char device. rc = %i",
-                rc);
+               "Failed to register the fibonacci char device. rc = %i",
+               rc);
         return rc;
     }
 
@@ -207,8 +220,7 @@ static int __init init_fib_dev(void)
         goto failed_class_create;
     }
 
-    if (!device_create(fib_class, NULL, fib_dev, NULL,
-                        DEV_FIBONACCI_NAME)) {
+    if (!device_create(fib_class, NULL, fib_dev, NULL, DEV_FIBONACCI_NAME)) {
         printk(KERN_ALERT "Failed to create device");
         rc = -4;
         goto failed_device_create;
