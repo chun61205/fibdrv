@@ -134,9 +134,10 @@ static ssize_t fib_read(struct file *file,
                         loff_t *offset)
 {
     bn *dest = fib_time_proxy(*offset);
-    char *result = bn_to_string(dest);
-    int len = strlen(result);
-    copy_to_user(buf, result, len);
+    // char *result = bn_to_string(dest);
+    // int len = strlen(result);
+    int len = dest->size;
+    copy_to_user(buf, (char *) dest->number, 4 * len);
     return (ssize_t) len;
 }
 
